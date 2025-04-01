@@ -17,6 +17,7 @@ kotlin {
             dependencies {
                 api(projects.oidcCore)
                 implementation(libs.russhwolf.multiplatformsettings)
+                implementation(libs.kotlinx.datetime)
 
                 api(libs.kotlinx.serialization.json)
             }

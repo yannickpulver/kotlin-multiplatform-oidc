@@ -8,7 +8,7 @@ import kotlinx.coroutines.sync.withLock
 import org.publicvalue.multiplatform.oidc.ExperimentalOpenIdConnect
 
 enum class SettingsKey {
-    ACCESSTOKEN, REFRESHTOKEN, IDTOKEN
+    ACCESSTOKEN, REFRESHTOKEN, IDTOKEN, EXPIRESIN, REFRESHTOKEN_EXPIRESIN, RECEIVEDAT
 }
 
 /**
@@ -25,10 +25,16 @@ open class SettingsTokenStore(
     private val currentAccessToken = MutableStateFlow<String?>(null)
     private val currentRefreshToken = MutableStateFlow<String?>(null)
     private val currentIdToken = MutableStateFlow<String?>(null)
+    private val currentExpiresIn = MutableStateFlow<Int?>(null)
+    private val currentRefreshTokenExpiresIn = MutableStateFlow<Int?>(null)
+    private val currentReceivedAt = MutableStateFlow<Long?>(null)
 
     private var accessTokenLoaded = false
     private var refreshTokenLoaded = false
     private var idTokenLoaded = false
+    private var expiresInLoaded = false
+    private var refreshTokenExpiresInLoaded = false
+    private var receivedAtLoaded = false
 
     override val accessTokenFlow get() = flow {
         if (!accessTokenLoaded) {
@@ -53,6 +59,30 @@ open class SettingsTokenStore(
         }
         emitAll(currentIdToken)
     }
+    
+    override val expiresInFlow get() = flow {
+        if (!expiresInLoaded) {
+            expiresInLoaded = true
+            currentExpiresIn.value = getExpiresIn()
+        }
+        emitAll(currentExpiresIn)
+    }
+    
+    override val refreshTokenExpiresInFlow get() = flow {
+        if (!refreshTokenExpiresInLoaded) {
+            refreshTokenExpiresInLoaded = true
+            currentRefreshTokenExpiresIn.value = getRefreshTokenExpiresIn()
+        }
+        emitAll(currentRefreshTokenExpiresIn)
+    }
+    
+    override val receivedAtFlow get() = flow {
+        if (!receivedAtLoaded) {
+            receivedAtLoaded = true
+            currentReceivedAt.value = getReceivedAt()
+        }
+        emitAll(currentReceivedAt)
+    }
 
     override suspend fun getAccessToken(): String? {
         return runOrNull {
@@ -74,6 +104,30 @@ open class SettingsTokenStore(
         return runOrNull {
             mutex.withLock {
                 settings.get(SettingsKey.IDTOKEN.name)
+            }
+        }
+    }
+    
+    override suspend fun getExpiresIn(): Int? {
+        return runOrNull {
+            mutex.withLock {
+                settings.get(SettingsKey.EXPIRESIN.name)?.toIntOrNull()
+            }
+        }
+    }
+    
+    override suspend fun getRefreshTokenExpiresIn(): Int? {
+        return runOrNull {
+            mutex.withLock {
+                settings.get(SettingsKey.REFRESHTOKEN_EXPIRESIN.name)?.toIntOrNull()
+            }
+        }
+    }
+    
+    override suspend fun getReceivedAt(): Long? {
+        return runOrNull {
+            mutex.withLock {
+                settings.get(SettingsKey.RECEIVEDAT.name)?.toLongOrNull()
             }
         }
     }
@@ -104,25 +158,79 @@ open class SettingsTokenStore(
             }
         }
     }
+    
+    override suspend fun removeExpiresIn() {
+        runOrNull {
+            mutex.withLock {
+                settings.remove(SettingsKey.EXPIRESIN.name)
+                currentExpiresIn.value = null
+            }
+        }
+    }
+    
+    override suspend fun removeRefreshTokenExpiresIn() {
+        runOrNull {
+            mutex.withLock {
+                settings.remove(SettingsKey.REFRESHTOKEN_EXPIRESIN.name)
+                currentRefreshTokenExpiresIn.value = null
+            }
+        }
+    }
+    
+    override suspend fun removeReceivedAt() {
+        runOrNull {
+            mutex.withLock {
+                settings.remove(SettingsKey.RECEIVEDAT.name)
+                currentReceivedAt.value = null
+            }
+        }
+    }
 
-    override suspend fun saveTokens(accessToken: String, refreshToken: String?, idToken: String?) {
+    override suspend fun saveTokens(
+        accessToken: String, 
+        refreshToken: String?, 
+        idToken: String?,
+        expiresIn: Int?,
+        refreshTokenExpiresIn: Int?,
+        receivedAt: Long
+    ) {
         runOrNull {
             mutex.withLock {
                 settings.put(SettingsKey.ACCESSTOKEN.name, accessToken)
+                
                 if (refreshToken != null) {
                     settings.put(SettingsKey.REFRESHTOKEN.name, refreshToken)
                 } else {
                     settings.remove(SettingsKey.REFRESHTOKEN.name)
                 }
+                
                 if (idToken != null) {
                     settings.put(SettingsKey.IDTOKEN.name, idToken)
                 } else {
                     settings.remove(SettingsKey.IDTOKEN.name)
                 }
+                
+                if (expiresIn != null) {
+                    settings.put(SettingsKey.EXPIRESIN.name, expiresIn.toString())
+                } else {
+                    settings.remove(SettingsKey.EXPIRESIN.name)
+                }
+                
+                if (refreshTokenExpiresIn != null) {
+                    settings.put(SettingsKey.REFRESHTOKEN_EXPIRESIN.name, refreshTokenExpiresIn.toString())
+                } else {
+                    settings.remove(SettingsKey.REFRESHTOKEN_EXPIRESIN.name)
+                }
+                
+                settings.put(SettingsKey.RECEIVEDAT.name, receivedAt.toString())
+                
                 // update cached values
                 currentAccessToken.value = accessToken
                 currentRefreshToken.value = refreshToken
                 currentIdToken.value = idToken
+                currentExpiresIn.value = expiresIn
+                currentRefreshTokenExpiresIn.value = refreshTokenExpiresIn
+                currentReceivedAt.value = receivedAt
             }
         }
     }

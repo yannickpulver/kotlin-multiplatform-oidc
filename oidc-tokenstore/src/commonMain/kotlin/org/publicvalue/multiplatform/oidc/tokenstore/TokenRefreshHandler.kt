@@ -11,6 +11,7 @@ import kotlin.experimental.ExperimentalObjCName
 import kotlin.experimental.ExperimentalObjCRefinement
 import kotlin.native.HiddenFromObjC
 import kotlin.native.ObjCName
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Concurrency-safe Token Refresh Handler.
@@ -51,7 +52,7 @@ class TokenRefreshHandler(
             } else {
                 val refreshToken = tokenStore.getRefreshToken()
                 var newTokens = refreshCall(refreshToken ?: "")
-                if(newTokens.refresh_token == null) {
+                if (newTokens.refresh_token == null) {
                     newTokens = newTokens.copy(refresh_token = refreshToken)
                 }
                 tokenStore.saveTokens(newTokens)
@@ -59,9 +60,74 @@ class TokenRefreshHandler(
                 OauthTokens(
                     accessToken = newTokens.access_token,
                     refreshToken = newTokens.refresh_token,
-                    idToken = newTokens.id_token
+                    idToken = newTokens.id_token,
+                    expiresIn = newTokens.expires_in,
+                    refreshTokenExpiresIn = newTokens.refresh_token_expires_in,
+                    receivedAt = newTokens.received_at
                 )
             }
         }
+    }
+
+    /**
+     * Executes the provided action with fresh tokens, refreshing them first if needed.
+     *
+     * @param client The OpenIdConnectClient used to refresh tokens if needed
+     * @param minValiditySeconds The minimum number of seconds the access token should be valid for (default: 300 seconds / 5 minutes)
+     * @param action The action to execute with fresh tokens. Receives the current tokens as a parameter.
+     * @return The result of the action execution
+     */
+    @Throws(OpenIdConnectException::class, CancellationException::class)
+    suspend fun <T> performWithFreshTokens(
+        client: OpenIdConnectClient,
+        minValiditySeconds: Long = 300, // 5 minutes
+        action: suspend (tokens: OauthTokens) -> T
+    ): T {
+        val tokens = mutex.withLock {
+            val currentTokens =
+                tokenStore.getTokens() ?: throw IllegalStateException("No tokens available")
+
+            // Check if token needs refreshing
+            val needsRefresh = currentTokens.isTokenRefreshNeeded(minValiditySeconds)
+
+            if (needsRefresh) {
+                refreshAndSaveToken(client, currentTokens.accessToken)
+            } else {
+                currentTokens
+            }
+        }
+
+        // Execute the action with the fresh tokens
+        return action(tokens)
+    }
+
+    /**
+     * Executes the provided action with fresh tokens, refreshing them first if needed.
+     *
+     * @param refreshCall The function to call to refresh tokens if needed
+     * @param minValiditySeconds The minimum number of seconds the access token should be valid for (default: 300 seconds / 5 minutes)
+     * @param action The action to execute with fresh tokens. Receives the current tokens as a parameter.
+     * @return The result of the action execution
+     */
+    @Throws(OpenIdConnectException::class, CancellationException::class)
+    @HiddenFromObjC
+    suspend fun <T> performWithFreshTokens(
+        refreshCall: suspend (String) -> AccessTokenResponse,
+        minValiditySeconds: Long = 5.minutes.inWholeSeconds,
+        action: suspend (tokens: OauthTokens) -> T
+    ): T {
+        val tokens = mutex.withLock {
+            val currentTokens = tokenStore.getTokens() ?: throw IllegalStateException("No tokens available")
+
+            val needsRefresh = currentTokens.isTokenRefreshNeeded(minValiditySeconds)
+            if (needsRefresh) {
+                refreshAndSaveToken(refreshCall, currentTokens.accessToken)
+            } else {
+                currentTokens
+            }
+        }
+
+        // Execute the action with the fresh tokens
+        return action(tokens)
     }
 }
